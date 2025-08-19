@@ -1,0 +1,19 @@
+[Unit]
+Description=Data Bridge (PostgreSQL + TimescaleDB)
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=%i
+WorkingDirectory=%h/projects/data-bridge-pgsql
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=%h/projects/data-bridge-pgsql/.env
+ExecStart=%h/projects/data-bridge-pgsql/.venv/bin/python %h/projects/data-bridge-pgsql/src/data_process_pg.py
+Restart=on-failure
+RestartSec=5s
+
+# Limites razoáveis (ajuste)
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
