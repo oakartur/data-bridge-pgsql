@@ -46,7 +46,7 @@ class Settings:
     pg_port: int = int(os.getenv("PGPORT", "5432"))
     pg_db: str = os.getenv("PGDATABASE", "databridge")
     pg_user: str = os.getenv("PGUSER", "databridge")
-    pg_pass: str = os.getenv("PGPASSWORD", "")
+    #pg_pass: str = os.getenv("PGPASSWORD", "")
     pg_connect_timeout: int = int(os.getenv("PGCONNECT_TIMEOUT", "10"))
     pg_target_schema: str = os.getenv("PGSCHEMA", "ingest")
     pg_table: str = os.getenv("PGTABLE", "readings")
