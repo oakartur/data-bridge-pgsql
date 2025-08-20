@@ -126,7 +126,7 @@ class Database:
             f"port={self.settings.pg_port} "
             f"dbname={self.settings.pg_db} "
             f"user={self.settings.pg_user} "
-            f"password={self.settings.pg_pass} "
+            #f"password={self.settings.pg_pass} "
             f"connect_timeout={self.settings.pg_connect_timeout} "
             f"options='-c statement_timeout={self.settings.pg_stmt_timeout_ms}'"
         )
