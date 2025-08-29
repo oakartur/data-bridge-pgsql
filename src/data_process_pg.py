@@ -718,7 +718,7 @@ class MqttApp:
     def __init__(self, settings: Settings, processor: Processor):
         self.settings = settings
         self.processor = processor
-        self.client = mqtt.Client()
+        self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
 
         if self.settings.mqtt_user and self.settings.mqtt_pass:
             self.client.username_pw_set(self.settings.mqtt_user, self.settings.mqtt_pass)
@@ -739,19 +739,19 @@ class MqttApp:
         self.client.on_message = self._on_message
         self.client.on_disconnect = self._on_disconnect
 
-    def _on_connect(self, client: mqtt.Client, userdata, flags, rc):
-        if rc == 0:
+    def _on_connect(self, client: mqtt.Client, userdata, flags, reason_code, properties):
+        if reason_code == 0:
             logger.info(f"Conectado ao MQTT {self.settings.mqtt_host}:{self.settings.mqtt_port}")
             client.subscribe(self.settings.mqtt_topic_in)
             logger.info(f"Inscrito em {self.settings.mqtt_topic_in}")
         else:
-            logger.error(f"Falha na conexão MQTT: código {rc}")
+            logger.error(f"Falha na conexão MQTT: código {reason_code}")
 
-    def _on_message(self, client: mqtt.Client, userdata, msg):
+    def _on_message(self, client: mqtt.Client, userdata, msg, properties=None):
         self.processor.handle_message(msg.topic, msg.payload)
 
-    def _on_disconnect(self, client: mqtt.Client, userdata, rc):
-        logger.info(f"[MQTT] Disconnected; rc={rc}")
+    def _on_disconnect(self, client: mqtt.Client, userdata, reason_code, properties):
+        logger.info(f"[MQTT] Disconnected; reason_code={reason_code}")
 
     def run_forever(self) -> None:
         self.client.connect(self.settings.mqtt_host, self.settings.mqtt_port, keepalive=self.settings.mqtt_keepalive)
