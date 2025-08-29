@@ -1,8 +1,5 @@
 # schema.py
 
-import jsonschema
-from jsonschema import validate, ValidationError
-
 # JSON Schema definitions for each known device profile
 SENSOR_SCHEMAS = {
     # Perfil NIT21LI
