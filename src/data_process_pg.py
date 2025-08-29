@@ -209,13 +209,12 @@ class Database:
             )
             # hypertable (idempotente)
             cur.execute(
-                sql.SQL(
-                    """
-                    SELECT create_hypertable({table}::regclass,'ts',
-                                             chunk_time_interval => INTERVAL '7 days',
-                                             if_not_exists => TRUE);
-                    """
-                ).format(table=sql.Identifier(schema, table))
+                """
+                SELECT create_hypertable(%s::regclass, %s::name,
+                                         chunk_time_interval => INTERVAL '7 days',
+                                         if_not_exists => TRUE);
+                """,
+                (f"{schema}.{table}", "ts"),
             )
 
     def _ensure_indexes(self) -> None:
