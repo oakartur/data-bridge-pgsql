@@ -24,7 +24,28 @@ from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 import psycopg
 from psycopg.rows import tuple_row
-from prometheus_client import Counter, Gauge, start_http_server
+try:
+    from prometheus_client import Counter, Gauge, start_http_server
+    _PROM_AVAILABLE = True
+except ModuleNotFoundError:  # pragma: no cover - fallback for missing dependency
+    _PROM_AVAILABLE = False
+
+    class _DummyMetric:
+        def inc(self, *args, **kwargs):
+            pass
+
+        def set(self, *args, **kwargs):
+            pass
+
+    def Counter(*args, **kwargs):  # type: ignore
+        return _DummyMetric()
+
+    Gauge = Counter  # type: ignore
+
+    def start_http_server(*args, **kwargs):  # type: ignore
+        logging.getLogger("data-process-pg").warning(
+            "prometheus_client not installed; metrics disabled"
+        )
 
 # ---------------------------------------------------------------------------
 # Dependências internas (mantidas)
@@ -737,7 +758,10 @@ class MqttApp:
 # ---------------------------------------------------------------------------
 
 def main():
-    start_http_server(SETTINGS.metrics_port)
+    if _PROM_AVAILABLE:
+        start_http_server(SETTINGS.metrics_port)
+    else:
+        logger.warning("prometheus_client not installed; metrics disabled")
     db = Database(SETTINGS)
     processor = Processor(db)
     MetricsMonitor(processor, SETTINGS)
