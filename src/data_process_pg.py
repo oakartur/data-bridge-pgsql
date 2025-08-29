@@ -24,6 +24,7 @@ from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 import psycopg
 from psycopg.rows import tuple_row
+from psycopg import sql
 try:
     from prometheus_client import Counter, Gauge, start_http_server
     _PROM_AVAILABLE = True
@@ -187,39 +188,68 @@ class Database:
         schema = self.settings.pg_target_schema
         table = self.settings.pg_table
         with self.conn.cursor() as cur:
-            cur.execute(f"CREATE SCHEMA IF NOT EXISTS {schema};")
-            cur.execute(f"""
-                CREATE TABLE IF NOT EXISTS {schema}.{table} (
-                    id               BIGSERIAL PRIMARY KEY,
-                    application_name TEXT,
-                    device_profile   TEXT NOT NULL,
-                    device_name      TEXT NOT NULL,
-                    ts               TIMESTAMPTZ NOT NULL,
-                    payload          JSONB NOT NULL
-                );
-            """)
+            cur.execute(
+                sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(
+                    sql.Identifier(schema)
+                )
+            )
+            cur.execute(
+                sql.SQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS {}.{} (
+                        id               BIGSERIAL PRIMARY KEY,
+                        application_name TEXT,
+                        device_profile   TEXT NOT NULL,
+                        device_name      TEXT NOT NULL,
+                        ts               TIMESTAMPTZ NOT NULL,
+                        payload          JSONB NOT NULL
+                    );
+                    """
+                ).format(sql.Identifier(schema), sql.Identifier(table))
+            )
             # hypertable (idempotente)
-            cur.execute(f"""
-                SELECT create_hypertable('{schema}.{table}','ts',
-                                         chunk_time_interval => INTERVAL '7 days',
-                                         if_not_exists => TRUE);
-            """)
+            cur.execute(
+                sql.SQL(
+                    """
+                    SELECT create_hypertable({table}::regclass,'ts',
+                                             chunk_time_interval => INTERVAL '7 days',
+                                             if_not_exists => TRUE);
+                    """
+                ).format(table=sql.Identifier(schema, table))
+            )
 
     def _ensure_indexes(self) -> None:
         schema = self.settings.pg_target_schema
         table = self.settings.pg_table
         with self.conn.cursor() as cur:
-            cur.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_dev_ts ON {schema}.{table} (device_profile, device_name, ts DESC);")
-            cur.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_ts ON {schema}.{table} (ts DESC);")
-            cur.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_payload_gin ON {schema}.{table} USING GIN (payload jsonb_path_ops);")
+            idx_dev_ts = sql.Identifier("idx_" + table + "_dev_ts")
+            idx_ts = sql.Identifier("idx_" + table + "_ts")
+            idx_payload = sql.Identifier("idx_" + table + "_payload_gin")
+            cur.execute(
+                sql.SQL(
+                    "CREATE INDEX IF NOT EXISTS {} ON {}.{} (device_profile, device_name, ts DESC)"
+                ).format(idx_dev_ts, sql.Identifier(schema), sql.Identifier(table))
+            )
+            cur.execute(
+                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} (ts DESC)").format(
+                    idx_ts, sql.Identifier(schema), sql.Identifier(table)
+                )
+            )
+            cur.execute(
+                sql.SQL(
+                    "CREATE INDEX IF NOT EXISTS {} ON {}.{} USING GIN (payload jsonb_path_ops)"
+                ).format(idx_payload, sql.Identifier(schema), sql.Identifier(table))
+            )
 
     def insert_reading(self, profile: str, device_name: str, application_name: str, ts_iso: str, payload_json: str) -> None:
         schema = self.settings.pg_target_schema
         table = self.settings.pg_table
         with self.conn.cursor() as cur:
             cur.execute(
-                f"INSERT INTO {schema}.{table} (device_profile, device_name, application_name, ts, payload) "
-                f"VALUES (%s, %s, %s, %s, %s::jsonb)",
+                sql.SQL(
+                    "INSERT INTO {}.{} (device_profile, device_name, application_name, ts, payload) "
+                    "VALUES (%s, %s, %s, %s, %s::jsonb)"
+                ).format(sql.Identifier(schema), sql.Identifier(table)),
                 (profile, device_name, application_name, ts_iso, payload_json)
             )
 
@@ -228,11 +258,13 @@ class Database:
         table = self.settings.pg_table
         with self.conn.cursor() as cur:
             cur.execute(
-                f"""
-                SELECT ts::text, payload::text FROM {schema}.{table}
-                 WHERE device_profile=%s AND device_name=%s AND ts>=%s AND ts<%s
-                 ORDER BY ts ASC
-                """,
+                sql.SQL(
+                    """
+                    SELECT ts::text, payload::text FROM {}.{}
+                     WHERE device_profile=%s AND device_name=%s AND ts>=%s AND ts<%s
+                     ORDER BY ts ASC
+                    """
+                ).format(sql.Identifier(schema), sql.Identifier(table)),
                 (profile, device_name, start_iso, end_iso)
             )
             return cur.fetchall()
@@ -242,11 +274,13 @@ class Database:
         table = self.settings.pg_table
         with self.conn.cursor() as cur:
             cur.execute(
-                f"""
-                SELECT payload::text FROM {schema}.{table}
-                 WHERE device_profile=%s AND device_name=%s AND ts<%s
-                 ORDER BY ts DESC LIMIT 1
-                """,
+                sql.SQL(
+                    """
+                    SELECT payload::text FROM {}.{}
+                     WHERE device_profile=%s AND device_name=%s AND ts<%s
+                     ORDER BY ts DESC LIMIT 1
+                    """
+                ).format(sql.Identifier(schema), sql.Identifier(table)),
                 (profile, device_name, ts_iso)
             )
             row = cur.fetchone()
