@@ -46,7 +46,7 @@ class Settings:
     pg_port: int = int(os.getenv("PGPORT", "5432"))
     pg_db: str = os.getenv("PGDATABASE", "databridge")
     pg_user: str = os.getenv("PGUSER", "databridge")
-    #pg_pass: str = os.getenv("PGPASSWORD", "")
+    pg_pass: str = os.getenv("PGPASSWORD", "")
     pg_connect_timeout: int = int(os.getenv("PGCONNECT_TIMEOUT", "10"))
     pg_target_schema: str = os.getenv("PGSCHEMA", "ingest")
     pg_table: str = os.getenv("PGTABLE", "readings")
@@ -121,12 +121,15 @@ class Database:
     def _dsn(self) -> str:
         if self.settings.pg_dsn:
             return self.settings.pg_dsn
+        password_part = (
+            f"password={self.settings.pg_pass} " if self.settings.pg_pass else ""
+        )
         return (
             f"host={self.settings.pg_host} "
             f"port={self.settings.pg_port} "
             f"dbname={self.settings.pg_db} "
             f"user={self.settings.pg_user} "
-            #f"password={self.settings.pg_pass} "
+            f"{password_part}"
             f"connect_timeout={self.settings.pg_connect_timeout} "
             f"options='-c statement_timeout={self.settings.pg_stmt_timeout_ms}'"
         )
