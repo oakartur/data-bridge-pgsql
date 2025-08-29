@@ -13,6 +13,7 @@ import json
 import time
 import math
 import logging
+import threading
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -23,6 +24,7 @@ from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 import psycopg
 from psycopg.rows import tuple_row
+from prometheus_client import Counter, Gauge, start_http_server
 
 # ---------------------------------------------------------------------------
 # Dependências internas (mantidas)
@@ -81,6 +83,11 @@ class Settings:
     default_region: str = os.getenv("DEFAULT_REGION", "br_national")
     default_tz: str = os.getenv("DEFAULT_TZ", "America/Sao_Paulo")
 
+    # Métricas/monitoramento
+    metrics_port: int = int(os.getenv("METRICS_PORT", "8000"))
+    metrics_log_interval: int = int(os.getenv("METRICS_LOG_INTERVAL_SEC", "60"))
+    insert_stale_threshold: int = int(os.getenv("INSERT_STALE_THRESHOLD_SEC", "300"))
+
 
 SETTINGS = Settings()
 
@@ -89,6 +96,14 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 logger = logging.getLogger("data-process-pg")
+
+# Métricas Prometheus
+INSERTIONS_COUNTER = Counter(
+    "db_insertions_total", "Total de inserções bem-sucedidas"
+)
+LAST_INSERT_GAUGE = Gauge(
+    "db_last_insert_timestamp", "Timestamp da última inserção (epoch)"
+)
 
 # ---------------------------------------------------------------------------
 # Constantes de Domínio / Mapas Regionais
@@ -456,6 +471,8 @@ def compute_hourly_expected_from_daily_weekend(db: Database, profile: str, devic
 class Processor:
     def __init__(self, db: Database):
         self.db = db
+        self.insert_count = 0
+        self.last_insert_ts: Optional[float] = None
 
     def handle_message(self, topic: str, payload_bytes: bytes) -> None:
         try:
@@ -493,6 +510,7 @@ class Processor:
             self._compute_itc200_enrich(profile, device_name, application_name, ts_iso, values)
 
         payload_json = json.dumps(values, ensure_ascii=False)
+
         max_attempts = 3
         for attempt in range(1, max_attempts + 1):
             try:
@@ -511,6 +529,7 @@ class Processor:
             except Exception as e:
                 logger.error(f"Erro ao inserir {profile}/{device_name}@{ts_iso}: {e}")
                 break
+
 
     @staticmethod
     def _parse_ts(ts_in: Optional[str]) -> datetime:
@@ -640,6 +659,33 @@ class Processor:
             values[prefix + "n_days"] = n
 
 # ---------------------------------------------------------------------------
+# Monitoramento e métricas
+# ---------------------------------------------------------------------------
+
+class MetricsMonitor:
+    def __init__(self, processor: "Processor", settings: Settings):
+        self.processor = processor
+        self.interval = settings.metrics_log_interval
+        self.threshold = settings.insert_stale_threshold
+        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.thread.start()
+
+    def _run(self) -> None:
+        while True:
+            time.sleep(self.interval)
+            count = self.processor.insert_count
+            last = self.processor.last_insert_ts
+            last_str = (
+                datetime.fromtimestamp(last, tz=UTC).isoformat() if last else "n/a"
+            )
+            logger.info(
+                f"stats insertions_total={count} last_insert={last_str}"
+            )
+            if last and (time.time() - last) > self.threshold:
+                delta = int(time.time() - last)
+                logger.warning(f"Sem novas inserções há {delta}s")
+
+# ---------------------------------------------------------------------------
 # MQTT Wiring
 # ---------------------------------------------------------------------------
 
@@ -691,8 +737,10 @@ class MqttApp:
 # ---------------------------------------------------------------------------
 
 def main():
+    start_http_server(SETTINGS.metrics_port)
     db = Database(SETTINGS)
     processor = Processor(db)
+    MetricsMonitor(processor, SETTINGS)
     app = MqttApp(SETTINGS, processor)
     app.run_forever()
 
