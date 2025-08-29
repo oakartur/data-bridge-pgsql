@@ -125,6 +125,9 @@ vim .env
 - `DB_BACKEND=postgres`
 - `PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD` (ou `PG_DSN`)
 - `INPUT_TOPIC`, `MQTT_BROKER_HOST`, `MQTT_BROKER_PORT`, `MQTT_USERNAME`, `MQTT_PASSWORD`, `MQTT_TLS_*`
+- `METRICS_PORT` (porta HTTP para expor métricas Prometheus; padrão 8000)
+- `METRICS_LOG_INTERVAL_SEC` (intervalo de log periódico; padrão 60)
+- `INSERT_STALE_THRESHOLD_SEC` (alerta se sem inserções por X s; padrão 300)
 
 ---
 
