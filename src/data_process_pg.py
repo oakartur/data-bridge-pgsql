@@ -536,6 +536,10 @@ class Processor:
         for attempt in range(1, max_attempts + 1):
             try:
                 self.db.insert_reading(profile, device_name, application_name, ts_iso, payload_json)
+                self.insert_count += 1
+                self.last_insert_ts = time.time()
+                INSERTIONS_COUNTER.inc()
+                LAST_INSERT_GAUGE.set(self.last_insert_ts)
                 logger.debug(f"Persistido {profile}/{device_name} @ {ts_iso}")
                 break
             except psycopg.OperationalError as e:
