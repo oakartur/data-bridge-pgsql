@@ -136,6 +136,14 @@ class Database:
         conn = psycopg.connect(self._dsn(), autocommit=True, row_factory=tuple_row)
         return conn
 
+    def _reconnect(self) -> None:
+        try:
+            if self.conn:
+                self.conn.close()
+        except Exception:
+            pass
+        self.conn = self._connect()
+
     def _ensure_schema(self) -> None:
         schema = self.settings.pg_target_schema
         table = self.settings.pg_table
@@ -482,11 +490,24 @@ class Processor:
             self._compute_itc200_enrich(profile, device_name, application_name, ts_iso, values)
 
         payload_json = json.dumps(values, ensure_ascii=False)
-        try:
-            self.db.insert_reading(profile, device_name, application_name, ts_iso, payload_json)
-            logger.debug(f"Persistido {profile}/{device_name} @ {ts_iso}")
-        except Exception as e:
-            logger.error(f"Erro ao inserir {profile}/{device_name}@{ts_iso}: {e}")
+        max_attempts = 3
+        for attempt in range(1, max_attempts + 1):
+            try:
+                self.db.insert_reading(profile, device_name, application_name, ts_iso, payload_json)
+                logger.debug(f"Persistido {profile}/{device_name} @ {ts_iso}")
+                break
+            except psycopg.OperationalError as e:
+                logger.warning(
+                    f"Erro operacional ao inserir {profile}/{device_name} @ {ts_iso} (tentativa {attempt}/{max_attempts}): {e}; reconectando"
+                )
+                self.db._reconnect()
+                if attempt == max_attempts:
+                    logger.error(
+                        f"Máximo de tentativas atingido para {profile}/{device_name}@{ts_iso}"
+                    )
+            except Exception as e:
+                logger.error(f"Erro ao inserir {profile}/{device_name}@{ts_iso}: {e}")
+                break
 
     @staticmethod
     def _parse_ts(ts_in: Optional[str]) -> datetime:
