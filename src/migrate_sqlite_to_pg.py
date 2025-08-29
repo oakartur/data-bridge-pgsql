@@ -48,6 +48,7 @@ def main():
 
     last_id = 0
     total = 0
+    failed = 0
     batch = args.batch_size
 
     # Caminho feliz: percorrer em ordem (id ASC) em lotes
@@ -66,20 +67,38 @@ def main():
         if not rows:
             break
 
+        batch_last_id = rows[-1]["id"]
+
         with pconn.cursor() as pc:
-            pc.execute("BEGIN;")
-            for r in rows:
-                last_id = r["id"]
-                # Normaliza ts (assume ISO UTC). Timescale aceita ISO com TZ.
-                ts_iso = r["ts"]
-                payload = r["payload"]
-                pc.execute(insert_sql, (r["application_name"], r["device_profile"], r["device_name"], ts_iso, payload))
-                total += 1
-            pc.execute("COMMIT;")
+            try:
+                with pconn.transaction():
+                    for r in rows:
+                        # Normaliza ts (assume ISO UTC). Timescale aceita ISO com TZ.
+                        ts_iso = r["ts"]
+                        payload = r["payload"]
+                        pc.execute(
+                            insert_sql,
+                            (
+                                r["application_name"],
+                                r["device_profile"],
+                                r["device_name"],
+                                ts_iso,
+                                payload,
+                            ),
+                        )
+                total += len(rows)
+                last_id = batch_last_id
+                print(f"Migrados: {total} (até id={last_id})")
+            except Exception as e:
+                failed += len(rows)
+                last_id = batch_last_id
+                print(
+                    f"Falha ao migrar lote até id={last_id}: {e}",
+                    file=sys.stderr,
+                )
+                continue
 
-        print(f"Migrados: {total} (até id={last_id})")
-
-    print(f"Concluído. Total migrado: {total}")
+    print(f"Concluído. Total migrado: {total}. Não migrados: {failed}")
 
 if __name__ == "__main__":
     main()
