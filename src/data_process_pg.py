@@ -48,7 +48,7 @@ class Settings:
     pg_port: int = int(os.getenv("PGPORT", "5432"))
     pg_db: str = os.getenv("PGDATABASE", "databridge")
     pg_user: str = os.getenv("PGUSER", "databridge")
-    #pg_pass: str = os.getenv("PGPASSWORD", "")
+    pg_pass: str = os.getenv("PGPASSWORD", "")
     pg_connect_timeout: int = int(os.getenv("PGCONNECT_TIMEOUT", "10"))
     pg_target_schema: str = os.getenv("PGSCHEMA", "ingest")
     pg_table: str = os.getenv("PGTABLE", "readings")
@@ -136,12 +136,15 @@ class Database:
     def _dsn(self) -> str:
         if self.settings.pg_dsn:
             return self.settings.pg_dsn
+        password_part = (
+            f"password={self.settings.pg_pass} " if self.settings.pg_pass else ""
+        )
         return (
             f"host={self.settings.pg_host} "
             f"port={self.settings.pg_port} "
             f"dbname={self.settings.pg_db} "
             f"user={self.settings.pg_user} "
-            #f"password={self.settings.pg_pass} "
+            f"{password_part}"
             f"connect_timeout={self.settings.pg_connect_timeout} "
             f"options='-c statement_timeout={self.settings.pg_stmt_timeout_ms}'"
         )
@@ -150,6 +153,14 @@ class Database:
         # autocommit para operações isoladas de DDL e INSERT simples
         conn = psycopg.connect(self._dsn(), autocommit=True, row_factory=tuple_row)
         return conn
+
+    def _reconnect(self) -> None:
+        try:
+            if self.conn:
+                self.conn.close()
+        except Exception:
+            pass
+        self.conn = self._connect()
 
     def _ensure_schema(self) -> None:
         schema = self.settings.pg_target_schema
@@ -499,16 +510,26 @@ class Processor:
             self._compute_itc200_enrich(profile, device_name, application_name, ts_iso, values)
 
         payload_json = json.dumps(values, ensure_ascii=False)
-        try:
-            self.db.insert_reading(profile, device_name, application_name, ts_iso, payload_json)
-            logger.debug(f"Persistido {profile}/{device_name} @ {ts_iso}")
-            self.insert_count += 1
-            now = time.time()
-            self.last_insert_ts = now
-            INSERTIONS_COUNTER.inc()
-            LAST_INSERT_GAUGE.set(now)
-        except Exception as e:
-            logger.error(f"Erro ao inserir {profile}/{device_name}@{ts_iso}: {e}")
+
+        max_attempts = 3
+        for attempt in range(1, max_attempts + 1):
+            try:
+                self.db.insert_reading(profile, device_name, application_name, ts_iso, payload_json)
+                logger.debug(f"Persistido {profile}/{device_name} @ {ts_iso}")
+                break
+            except psycopg.OperationalError as e:
+                logger.warning(
+                    f"Erro operacional ao inserir {profile}/{device_name} @ {ts_iso} (tentativa {attempt}/{max_attempts}): {e}; reconectando"
+                )
+                self.db._reconnect()
+                if attempt == max_attempts:
+                    logger.error(
+                        f"Máximo de tentativas atingido para {profile}/{device_name}@{ts_iso}"
+                    )
+            except Exception as e:
+                logger.error(f"Erro ao inserir {profile}/{device_name}@{ts_iso}: {e}")
+                break
+
 
     @staticmethod
     def _parse_ts(ts_in: Optional[str]) -> datetime:
